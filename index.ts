@@ -8,13 +8,13 @@ var cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 const app: Express = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 
 app.use(express.json());
 const corsOptions = {
   optionsSuccessStatus: 200,
   credentials: true,
-  origin:'http://localhost:5173', 
+  origin:'http://localhost:3000', 
 }
 app.use(cors(corsOptions));
 app.use(cookieParser());
@@ -42,7 +42,7 @@ store.on('error', (error: any)=> {
 
 // dbconnection;
 connectDB();
-app.use(routes);
+app.use('/api', routes);
 
 app.listen(port, () => {
   console.log(`[server]: Server is running at http://localhost:${port}`);
