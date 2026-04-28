@@ -179,61 +179,70 @@ export class Agent {
     }
   }
 
-  
+
   ctrlGetAgents = async (req: Request & { file?: any }, res: Response, next: NextFunction) => {
-    try {
-      const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
-      const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10), 1), 1000);
-      const skip = (page - 1) * limit;
+  try {
+    const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10), 1), 1000);
+    const skip = (page - 1) * limit;
 
-      // filter can be provided as JSON in ?filter={"City":"Delhi"} or a simple q search in ?q=term
-      let filter: any = {};
-      if (req.query.filter) {
-        try {
-          filter = JSON.parse(String(req.query.filter));
-        } catch (e) {
-          return res.status(400).json({ success: false, message: "Invalid filter JSON" });
-        }
-      } else if (req.query.q) {
-        const q = String(req.query.q);
-        // common fields; adjust as needed for your sheet columns
-        filter = {
-          $or: [
-            { Name: { $regex: q, $options: "i" } },
-            { Email: { $regex: q, $options: "i" } },
-            { Mobile: { $regex: q, $options: "i" } },
-            { Pincode: { $regex: q, $options: "i" } },
-          ],
-        };
-      }
+    console.log("Search query========:", req.query);
 
-      // optional sort as JSON string, e.g. ?sort={"Name":1} defaults to newest first
-      let sort: any = { _id: -1 };
-      if (req.query.sort) {
-        try {
-          sort = JSON.parse(String(req.query.sort));
-        } catch (e) {
-          return res.status(400).json({ success: false, message: "Invalid sort JSON" });
-        }
-      }
+    const RESERVED = new Set(["page", "limit", "sort", "filter", "q"]);
 
-      const [data, total] = await Promise.all([
-        ExcelRow.find(filter).sort(sort).skip(skip).limit(limit).lean().exec(),
-        ExcelRow.countDocuments(filter),
-      ]);
-
-      res.json({
-        success: true,
-        page,
-        limit,
-        total,
-        data,
-      });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ success: false, message: "Server error" });
+    function coerceValue(str: string): boolean | number | string {
+      if (str === "true")  return true;
+      if (str === "false") return false;
+      const num = Number(str);
+      if (!isNaN(num) && str.trim() !== "") return num; // "5001" → 5001
+      return str;
     }
+
+    let filter: any = {};
+
+    if (req.query.filter) {
+      try {
+        filter = JSON.parse(String(req.query.filter));
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid filter JSON" });
+      }
+    } else if (req.query.q) {
+      const q = String(req.query.q);
+      filter = {
+        $or: [
+          { Name:    { $regex: q, $options: "i" } },
+          { Email:   { $regex: q, $options: "i" } },
+          { Mobile:  { $regex: q, $options: "i" } },
+          { Pincode: { $regex: q, $options: "i" } },
+        ],
+      };
+    } else {
+      for (const [key, value] of Object.entries(req.query)) {
+        if (RESERVED.has(key)) continue;
+        filter[key] = coerceValue(String(value));
+      }
+    }
+
+    let sort: any = { _id: -1 };
+    if (req.query.sort) {
+      try {
+        sort = JSON.parse(String(req.query.sort));
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid sort JSON" });
+      }
+    }
+
+    const [data, total] = await Promise.all([
+      ExcelRow.find(filter).sort(sort).skip(skip).limit(limit).lean().exec(),
+      ExcelRow.countDocuments(filter),
+    ]);
+
+    res.json({ success: true, page, limit, total, data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
+};
 
   ctrlGetZones = async (req: Request & { file?: any }, res: Response, next: NextFunction) => {
     try {
@@ -271,7 +280,26 @@ export class Agent {
     }
   }
 
-  // Developer Purpose
+  // Developer Purpose scripts for DB data.
+
+  ctrlRunDbScripts = async (req: Request & { file?: any }, res: Response, next: NextFunction) => {
+    try{
+      // Creating initial zones
+      await this.ctrlCreateZones(req, res, next);
+      // Creating initial regions
+      await this.ctrlCreateRegions(req, res, next);
+      await this.ctrlCreateSampleAgents(req, res, next);
+
+
+      res.status(201).json({ success: true });
+
+    }catch (err) {
+      console.error(err);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  }
+
+    // PreScripts for zones
   ctrlCreateZones = async (req: Request & { file?: any }, res: Response, next: NextFunction) => {
     try {
       const zonesData = [
@@ -311,14 +339,16 @@ export class Agent {
       }));
 
       const result = await Zone.bulkWrite(ops, { ordered: false });
+      console.log("Zones Created!");
+      return result;
 
-      res.status(201).json({ success: true, result });
+      // res.status(201).json({ success: true, result });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ success: false, message: "Server error" });
+      console.error("Error While creating zones:", err);
     }
   }
 
+  // PreScripts for regions in DB.
   ctrlCreateRegions = async (req: Request & { file?: any }, res: Response, next: NextFunction) => {
     try {
 
@@ -392,11 +422,64 @@ export class Agent {
       }));
 
       const result = await Region.bulkWrite(ops, { ordered: false });
+      console.log("Regions Created!");
+      return result;
 
-      res.status(201).json({ success: true, result });
+      // res.status(201).json({ success: true, result });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ success: false, message: "Server error" });
+      // res.status(500).json({ success: false, message: "Server error" });
+      console.log("Error occurred while creating regions");
+    }
+  }
+
+  // Scripts for Sample Agents
+  ctrlCreateSampleAgents = async (req: Request & { file?: any }, res: Response, next: NextFunction) => {
+    try {
+      // Creating for karnataka regions
+      const sampleAgents = [
+        { agentId: 5001, firstName: "BM-Agent A", lastName: "Last A", regionId: 203, email: "agentA@example.com", mobile: "1234567890", pincode: ["560066"], isBranchManager: true },
+        { agentId: 5002, branchManagerId: 5001, isBranchManager: false, firstName: "Agent B", lastName: "Last B", regionId: 203, email: "agentB@example.com", mobile: "1234567890", pincode: ["560066"] },
+        { agentId: 5003, branchManagerId: 5001,isBranchManager: false,  firstName: "Agent C", lastName: "Last C", regionId: 203, email: "agentC@example.com", mobile: "1234567890", pincode: ["560066"] },
+        { agentId: 5004, branchManagerId: 5001, isBranchManager: false, firstName: "Agent D", lastName: "Last D", regionId: 203, email: "agentD@example.com", mobile: "1234567890", pincode: ["560066"] },
+        { agentId: 5005, branchManagerId: 5001, isBranchManager: false, firstName: "Agent E", lastName: "Last E", regionId: 203, email: "agentE@example.com", mobile: "1234567890", pincode: ["560066"] },
+        { agentId: 5006, firstName: "BM-Agent F", lastName: "Last F", regionId: 203, email: "agentF@example.com", mobile: "1234567890", pincode: ["560066"], isBranchManager: true },
+      ];
+
+      // ensure Agent model is available (avoid re-declaring if already defined)
+      let Agent: any;
+      try {
+        Agent = mongoose.model("Agent");
+      } catch (e) {
+        const AgentSchema = new mongoose.Schema({ agentId: Number, branchManagerId: Number, firstName: String, lastName: String, email: String, mobile: String, pincode: [String], regionId: Number , isBranchManager: Boolean }, { strict: false });
+        Agent = mongoose.model("Agent", AgentSchema, "agents");
+      }
+
+      // ensure unique index on agentId to prevent DB duplicates
+      try { 
+        // eslint-disable-next-line no-await-in-loop
+        await Agent.collection.createIndex({ agentId: 1 }, { unique: true });
+      } catch (idxErr) {
+        // ignore index creation errors
+      }
+
+      // use bulkWrite upserts to insert/update without duplicates
+      const ops = sampleAgents.map(a => ({
+        updateOne: {
+          filter: { agentId: a.agentId },
+          update: { $set: { agentId: a.agentId, branchManagerId: a.branchManagerId, isBranchManager: a.isBranchManager, firstName: a.firstName, lastName: a.lastName, email: a.email, mobile: a.mobile, pincode: a.pincode, regionId: a.regionId } },
+          upsert: true
+        }
+      }));
+
+      const result = await Agent.bulkWrite(ops, { ordered: false });
+      console.log("Sample Agents Created!")
+      return result;
+
+      // res.status(201).json({ success: true, result });
+    } catch (err) {
+      console.error(err);
+      console.log("Error occurred while creating agents");
     }
   }
 

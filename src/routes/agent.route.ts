@@ -29,6 +29,9 @@ agentsRouter.get('/getRegions', async (req: Request, res: Response, next: NextFu
 // Developer Purpose
 // Creating initial tables as Zones, Regions
 
+agentsRouter.post('/rundbscripts', async (req: Request, res: Response, next: NextFunction) =>
+    agent.ctrlRunDbScripts(req, res, next));
+
 agentsRouter.post('/createzones', async (req: Request, res: Response, next: NextFunction) =>
     agent.ctrlCreateZones(req, res, next));
 
